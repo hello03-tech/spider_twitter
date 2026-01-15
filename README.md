@@ -1,4 +1,4 @@
-# 推特图片下载
+# 推特爬虫
 
 主要参考https://github.com/caolvchong-top/twitter_download
 并根据特定需求做出一定的导出修改
@@ -7,19 +7,6 @@
 
 支持排除转推内容 & 多用户爬取 & 时间范围限制 & 按Tag获取 & 纯文本获取 & 高级搜索 & 评论区下载
 
----
-**目前老马加了API的请求次数限制** 
-``` 
-当程序抛出：Rate limit exceeded 
-即表示该账号当日的API调用次数已耗尽
-
-if 选择包含转推:
-  爬完一个用户需要调用的API次数约为:总推数(含转推) / 19
-elif 不包含:
-  会大大减少API调用次数
-
-下载不计入次数 
-```
 
 部署
 --- 
@@ -33,11 +20,8 @@ pip3 install -r requirements.txt
 ``` 
 **运行** : 
 ``` 
-配置settings.json文件
-python3 main.py 
-
-# 建议：不要把真实 cookie 提交到 git。
-# 你可以把 cookie 单独放到 settings.local.json（已在 .gitignore 中），运行时会自动覆盖 settings.json 里的同名字段。
+配置settings.json文件 写入cookie
+./run_spider.sh
 
 # (可选) 不修改 settings.json 的 user_lst，直接从命令行传入用户名
 # 例如:
