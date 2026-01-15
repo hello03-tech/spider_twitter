@@ -35,8 +35,36 @@ pip3 install -r requirements.txt
 ``` 
 配置settings.json文件
 python3 main.py 
+
+# 建议：不要把真实 cookie 提交到 git。
+# 你可以把 cookie 单独放到 settings.local.json（已在 .gitignore 中），运行时会自动覆盖 settings.json 里的同名字段。
+
+# (可选) 不修改 settings.json 的 user_lst，直接从命令行传入用户名
+# 例如:
+python3 main.py user1,user2
+# 或
+python3 main.py user1 user2
+
+# (可选) 关键词搜索下载(不限制用户)
+python3 search_down.py "openai lang:zh filter:media -filter:replies" --count 200
+# 默认输出为 JSONL 记录文件（仍会下载媒体文件）；如需 CSV：加 --format csv
+python3 search_down.py "openai lang:zh filter:media -filter:replies" --count 200 --format csv
+# 或通过 main.py 转发:
+python3 main.py --search "openai lang:zh filter:media -filter:replies" --count 200
 ``` 
 **Windows** 和上面的一样，配置完setting.json后运行main.py即可 
+
+新增输出（可选）
+---
+在 `settings.json` 中开启 `rich_output` 后，`main.py` 会在每个用户目录下额外输出 `*-rich.jsonl`，包含尽可能多的推文/媒体元信息（时间、推文URL、文本、实体信息、媒体信息、本地文件路径等）。
+
+`reply_down.py` 也会在目标目录下额外输出 `*-Reply.jsonl`（可在脚本顶部开关 `rich_output`）。
+
+如果你只需要导出「日期 / URL / 文本」的汇总内容，`export_content.py` 也支持输出为 JSON/JSONL：
+```bash
+python3 export_content.py --format json  -o exported_content.json
+python3 export_content.py --format jsonl -o exported_content.jsonl
+```
 
 
 注意事项
@@ -86,6 +114,4 @@ _filter = ""
 实例参考：https://github.com/caolvchong-top/twitter_download/issues/63#issuecomment-2351039320 & https://github.com/caolvchong-top/twitter_download/issues/106
 
 
-
-
-
+ 

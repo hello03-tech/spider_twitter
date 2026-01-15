@@ -2,7 +2,7 @@ import os
 import httpx
 import re
 import json
-from url_utils import quote_url
+from url_utils import quote_url, cookie_get, require_cookie_fields
 
 
 
@@ -24,8 +24,8 @@ _headers = {
     'authorization':'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
 }
 _headers['cookie'] = cookie
-re_token = 'ct0=(.*?);'
-_headers['x-csrf-token'] = re.findall(re_token,_headers['cookie'])[0]
+require_cookie_fields(cookie, 'auth_token', 'ct0')
+_headers['x-csrf-token'] = cookie_get(cookie, 'ct0')
 
 def profile_down(screen_name, path):
 

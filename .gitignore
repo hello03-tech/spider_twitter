@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+
+.venv/
+.env
+
+# Local/private settings overrides (keep secrets like cookie here)
+settings.local.json
+
+# Generated outputs / downloads
+data/
+datas/
+exported_content.*
+*-rich.jsonl
+*-Reply.jsonl
+*.log
+cache_data.log
+
+# Example local download folders (created by username)
+lilmonix3/
+matchach/
+

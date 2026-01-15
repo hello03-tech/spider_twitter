@@ -8,12 +8,14 @@ import time
 import json
 from datetime import datetime
 from urllib.parse import quote
-from url_utils import quote_url
+from pathlib import Path
+from url_utils import quote_url, cookie_get, require_cookie_fields
 from tag_down import get_heighest_video_quality
 from tag_down import hash_save_token
 from tag_down import stamp2time
 from transaction_generate import get_transaction_id
 from transaction_generate import get_url_path
+from rich_output import JsonlWriter, extract_tweet_record, unwrap_tweet_result
 
 ##########配置区域##########
 
@@ -38,6 +40,12 @@ time_range = "2024-02-06:2024-08-06"
 
 media_down = True
 # 开启后将同时下载评论内容中的媒体文件.
+
+rich_output = True
+# 开启后额外输出 .jsonl，记录尽可能多的评论元信息
+
+rich_include_raw_legacy = False
+# 开启后在 jsonl 中附带 raw_legacy 字段（体积更大）
 
 # ------------------------ #
 
@@ -70,9 +78,9 @@ class csv_gen():
         main_par_info[3] = self.stamp2time(main_par_info[3])    #传进来的是 int 时间戳, 故转换一下
         self.writer.writerow(main_par_info)
 
-def download_control(media_lst):
+def download_control(media_lst, rich_writer=None):
     async def _main():
-        async def down_save(url, _file_name, is_image):
+        async def down_save(url, _file_name, is_image, meta=None):
             if is_image:
                 url += '?format=png&name=4096x4096'
 
@@ -84,6 +92,21 @@ def download_control(media_lst):
                             response = await client.get(quote_url(url), timeout=(3.05, 16))        #如果出现第五次或以上的下载失败,且确认不是网络问题,可以适当降低最大并发数量
                     with open(_file_name,'wb') as f:
                         f.write(response.content)
+                    if rich_writer and isinstance(meta, dict):
+                        rich_writer.write(
+                            {
+                                "kind": "reply_media",
+                                "parent_tweet_id": meta.get("parent_tweet_id"),
+                                "parent_tweet_url": meta.get("parent_tweet_url"),
+                                "reply_id": meta.get("reply_id"),
+                                "reply_url": meta.get("reply_url"),
+                                "created_at_ms": meta.get("created_at_ms"),
+                                "media_url": meta.get("media_url"),
+                                "media_type": meta.get("media_type"),
+                                "local_file": os.path.split(_file_name)[1],
+                                "local_path": _file_name,
+                            }
+                        )
                     break
                 except Exception as e:
                     if count >= 50:
@@ -94,7 +117,7 @@ def download_control(media_lst):
                     print(f'{url}=====>第{count}次下载失败,正在重试')
 
         semaphore = asyncio.Semaphore(max_concurrent_requests)
-        await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2])) for url in media_lst])   # 0:url 1:_file_name 2:is_image
+        await asyncio.gather(*[asyncio.create_task(down_save(u[0], u[1], u[2], u[3] if len(u) > 3 else None)) for u in media_lst])   # 0:url 1:_file_name 2:is_image 3:meta
 
     asyncio.run(_main())
 
@@ -127,14 +150,15 @@ class Reply_down():
     def __init__(self, _target):
         self.target = _target
         self.folder_path = os.getcwd() + os.sep
+        self.rich_writer = None
 
         self._headers = {
             'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
             'authorization':'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
         }
         self._headers['cookie'] = cookie
-        re_token = 'ct0=(.*?);'
-        self._headers['x-csrf-token'] = re.findall(re_token, cookie)[0]
+        require_cookie_fields(cookie, 'auth_token', 'ct0')
+        self._headers['x-csrf-token'] = cookie_get(cookie, 'ct0')
 
         self.cursor = ''
 
@@ -145,6 +169,8 @@ class Reply_down():
             if not os.path.exists(self.folder_path):   #创建文件夹
                 os.makedirs(self.folder_path)
             self.csv = csv_gen(self.folder_path)
+            if rich_output:
+                self.rich_writer = JsonlWriter(Path(self.folder_path) / f'{datetime.now().strftime("%Y-%m-%d %H-%M-%S")}-Reply.jsonl')
             self.get_result()
 
         else:   #指定推文
@@ -152,13 +178,16 @@ class Reply_down():
             if not os.path.exists(self.folder_path):   #创建文件夹
                 os.makedirs(self.folder_path)
             self.csv = csv_gen(self.folder_path)
+            if rich_output:
+                self.rich_writer = JsonlWriter(Path(self.folder_path) / f'{datetime.now().strftime("%Y-%m-%d %H-%M-%S")}-Reply.jsonl')
             self.id2reply(self.tweet_id)
 
         self.csv.csv_close()
+        if self.rich_writer:
+            self.rich_writer.close()
 
     def id2reply(self, tweet_id:str):
         _cursor = ''
-        media_lst = []
         is_completed = False
         while not is_completed:
             url = 'https://x.com/i/api/graphql/_8aYOgEDz35BrBcBal1-_w/TweetDetail?variables={"focalTweetId":"' + tweet_id + '","cursor":"' + _cursor + '","referrer":"tweet","with_rux_injections":false,"rankingMode":"Relevance","includePromotedContent":false,"withCommunity":true,"withQuickPromoteEligibilityTweetFields":true,"withBirdwatchNotes":true,"withVoice":true}&features={"rweb_video_screen_enabled":false,"profile_label_improvements_pcf_label_in_post_enabled":true,"rweb_tipjar_consumption_enabled":true,"verified_phone_label_enabled":false,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_timeline_navigation_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"premium_content_api_read_enabled":false,"communities_web_enable_tweet_community_results_fetch":true,"c9s_tweet_anatomy_moderator_badge_enabled":true,"responsive_web_grok_analyze_button_fetch_trends_enabled":false,"responsive_web_grok_analyze_post_followups_enabled":true,"responsive_web_jetfuel_frame":false,"responsive_web_grok_share_attachment_enabled":true,"articles_preview_enabled":true,"responsive_web_edit_tweet_api_enabled":true,"graphql_is_translatable_rweb_tweet_is_translatable_enabled":true,"view_counts_everywhere_api_enabled":true,"longform_notetweets_consumption_enabled":true,"responsive_web_twitter_article_tweet_consumption_enabled":true,"tweet_awards_web_tipping_enabled":false,"responsive_web_grok_show_grok_translated_post":false,"responsive_web_grok_analysis_button_from_backend":false,"creator_subscriptions_quote_tweet_preview_enabled":false,"freedom_of_speech_not_reach_fetch_enabled":true,"standardized_nudges_misinfo":true,"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true,"longform_notetweets_rich_text_read_enabled":true,"longform_notetweets_inline_media_enabled":true,"responsive_web_grok_image_annotation_enabled":true,"responsive_web_enhance_cards_enabled":false}&fieldToggles={"withArticleRichContentState":true,"withArticlePlainText":false,"withGrokAnalyze":false,"withDisallowedReplyControls":false}'
@@ -168,6 +197,15 @@ class Reply_down():
             response = httpx.get(url, headers=self._headers).text
             try:
                 raw_data = json.loads(response)
+                if isinstance(raw_data, dict) and raw_data.get('errors'):
+                    first = raw_data['errors'][0] if isinstance(raw_data['errors'], list) and raw_data['errors'] else raw_data['errors']
+                    code = first.get('code') if isinstance(first, dict) else None
+                    msg = first.get('message') if isinstance(first, dict) else str(first)
+                    print(f'API错误: {code} {msg}')
+                    if code == 353 or 'csrf' in str(msg).lower():
+                        print('提示: 需要 cookie 中的 ct0 与请求头 x-csrf-token 匹配；请更新/检查 cookie。')
+                    print(response)
+                    return
             except Exception:
                 if 'Rate limit exceeded' in response:
                     print('API次数已超限')
@@ -198,23 +236,24 @@ class Reply_down():
                         _reply = _reply['content']['items'][0]
                         if 'conversationthread' not in _reply['entryId']:
                             continue
-                        _reply = _reply['item']['itemContent']['tweet_results']['result']
-                        if 'tweet' in _reply and 'edit_control' not in _reply:
-                            _reply = _reply['tweet']
+                        _reply = unwrap_tweet_result(_reply['item']['itemContent']['tweet_results']['result'])
 
                         if 'editable_until_msecs' in _reply['edit_control']:
-                            time_stamp = int(_reply['edit_control']['editable_until_msecs']) - 3600000
+                            editable_until = int(_reply['edit_control']['editable_until_msecs'])
                         elif 'edit_control_initial' in _reply['edit_control'] and 'editable_until_msecs' in _reply['edit_control']['edit_control_initial']:
-                            time_stamp = int(_reply['edit_control']['edit_control_initial']['editable_until_msecs']) - 3600000
+                            editable_until = int(_reply['edit_control']['edit_control_initial']['editable_until_msecs'])
                         else:
                             continue
+                        time_stamp = editable_until - 3600000
 
                         parent_tweet_url = f'https://x.com/{self.user_name}/status/{tweet_id}'
                         replier_display_name = _reply['core']['user_results']['result']['legacy']['name']
-                        replier_user_name = '@' + _reply['core']['user_results']['result']['legacy']['screen_name']
+                        reply_screen_name = _reply['core']['user_results']['result']['legacy']['screen_name']
+                        replier_user_name = '@' + reply_screen_name
                         reply_date = time_stamp
                         reply_content = _reply['legacy']['full_text']
-                        reply_url = f'https://x.com/{replier_user_name}/status/{_reply["legacy"]["id_str"]}'
+                        reply_id = _reply["legacy"]["id_str"]
+                        reply_url = f'https://x.com/{reply_screen_name}/status/{reply_id}'
                         reply_favorite_count = _reply['legacy']['favorite_count']
                         reply_retweet_count = _reply['legacy']['retweet_count']
                         reply_reply_count = _reply['legacy']['reply_count']
@@ -225,6 +264,21 @@ class Reply_down():
                     print(e)
                     continue
 
+                if rich_output and self.rich_writer:
+                    rec = extract_tweet_record(
+                        _reply,
+                        url_fallback_screen_name=reply_screen_name,
+                        editable_until_msecs=editable_until,
+                        context={"parent_tweet_id": tweet_id, "parent_tweet_url": parent_tweet_url},
+                        include_raw_legacy=rich_include_raw_legacy,
+                    )
+                    if rec:
+                        rec["kind"] = "reply"
+                        rec["parent_tweet_id"] = tweet_id
+                        rec["parent_tweet_url"] = parent_tweet_url
+                        self.rich_writer.write(rec)
+
+                per_reply_media_lst = []
                 if media_down and 'extended_entities' in _reply['legacy']:
                     try:
                         raw_media_lst = _reply['legacy']['extended_entities']['media']
@@ -233,20 +287,31 @@ class Reply_down():
                                 media_url = get_heighest_video_quality(_media['video_info']['variants'])
                                 is_image = False
                                 _file_name = f'{self.folder_path}{stamp2time(time_stamp)}_{replier_user_name}_{hash_save_token(media_url)}_reply.mp4'
+                                media_type = "Video"
                             else:
                                 media_url = _media['media_url_https']
                                 is_image = True
                                 _file_name = f'{self.folder_path}{stamp2time(time_stamp)}_{replier_user_name}_{hash_save_token(media_url)}_reply.png'
+                                media_type = "Image"
 
-                            media_lst.append([media_url, _file_name, is_image])
+                            meta = {
+                                "parent_tweet_id": tweet_id,
+                                "parent_tweet_url": parent_tweet_url,
+                                "reply_id": reply_id,
+                                "reply_url": reply_url,
+                                "created_at_ms": time_stamp,
+                                "media_url": media_url,
+                                "media_type": media_type,
+                            }
+                            per_reply_media_lst.append([media_url, _file_name, is_image, meta])
                     except Exception as e:
                         print(e)
 
                 _csv_info = [parent_tweet_url, replier_display_name, replier_user_name, reply_date, reply_content, reply_url, reply_favorite_count, reply_retweet_count, reply_reply_count]
                 self.csv.data_input(_csv_info)
 
-                if media_lst:
-                    download_control(media_lst)
+                if per_reply_media_lst:
+                    download_control(per_reply_media_lst, rich_writer=self.rich_writer)
                     
 
 
@@ -280,6 +345,15 @@ class Reply_down():
             response = httpx.get(url, headers=_headers).text
             try:
                 raw_data = json.loads(response)
+                if isinstance(raw_data, dict) and raw_data.get('errors'):
+                    first = raw_data['errors'][0] if isinstance(raw_data['errors'], list) and raw_data['errors'] else raw_data['errors']
+                    code = first.get('code') if isinstance(first, dict) else None
+                    msg = first.get('message') if isinstance(first, dict) else str(first)
+                    print(f'API错误: {code} {msg}')
+                    if code == 353 or 'csrf' in str(msg).lower():
+                        print('提示: 需要 cookie 中的 ct0 与请求头 x-csrf-token 匹配；请更新/检查 cookie。')
+                    print(response)
+                    return
             except Exception:
                 if 'Rate limit exceeded' in response:
                     print('API次数已超限')

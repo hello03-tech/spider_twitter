@@ -9,7 +9,7 @@ import json
 import hashlib
 from datetime import datetime
 from urllib.parse import quote
-from url_utils import quote_url
+from url_utils import quote_url, cookie_get, require_cookie_fields
 from transaction_generate import get_url_path
 from transaction_generate import get_transaction_id
 
@@ -160,8 +160,8 @@ class tag_down():
             'authorization':'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
         }
         self._headers['cookie'] = cookie
-        re_token = 'ct0=(.*?);'
-        self._headers['x-csrf-token'] = re.findall(re_token, cookie)[0]
+        require_cookie_fields(cookie, 'auth_token', 'ct0')
+        self._headers['x-csrf-token'] = cookie_get(cookie, 'ct0')
         self._headers['referer'] = f'https://twitter.com/search?q={quote(tag + _filter)}&src=typed_query&f=media'
 
         self.cursor = ''
@@ -194,6 +194,15 @@ class tag_down():
         response = httpx.get(url, headers=self._headers).text
         try:
             raw_data = json.loads(response)
+            if isinstance(raw_data, dict) and raw_data.get('errors'):
+                first = raw_data['errors'][0] if isinstance(raw_data['errors'], list) and raw_data['errors'] else raw_data['errors']
+                code = first.get('code') if isinstance(first, dict) else None
+                msg = first.get('message') if isinstance(first, dict) else str(first)
+                print(f'API错误: {code} {msg}')
+                if code == 353 or 'csrf' in str(msg).lower():
+                    print('提示: 需要 cookie 中的 ct0 与请求头 x-csrf-token 匹配；请更新/检查 cookie。')
+                print(response)
+                return
         except Exception:
             if 'Rate limit exceeded' in response:
                 print('API次数已超限')
@@ -265,7 +274,22 @@ class tag_down():
         media_lst = []
 
         response = httpx.get(url, headers=self._headers).text
-        raw_data = json.loads(response)
+        try:
+            raw_data = json.loads(response)
+            if isinstance(raw_data, dict) and raw_data.get('errors'):
+                first = raw_data['errors'][0] if isinstance(raw_data['errors'], list) and raw_data['errors'] else raw_data['errors']
+                code = first.get('code') if isinstance(first, dict) else None
+                msg = first.get('message') if isinstance(first, dict) else str(first)
+                print(f'API错误: {code} {msg}')
+                print(response)
+                return
+        except Exception:
+            if 'Rate limit exceeded' in response:
+                print('API次数已超限')
+            else:
+                print('获取数据失败')
+            print(response)
+            return
         if not self.cursor: #第一次
             raw_data = raw_data['data']['search_by_raw_query']['search_timeline']['timeline']['instructions'][-1]['entries']
             if len(raw_data) == 2:
@@ -335,7 +359,22 @@ class tag_down():
         #接收某页链接，保存所有文本内容
 
         response = httpx.get(url, headers=self._headers).text
-        raw_data = json.loads(response)
+        try:
+            raw_data = json.loads(response)
+            if isinstance(raw_data, dict) and raw_data.get('errors'):
+                first = raw_data['errors'][0] if isinstance(raw_data['errors'], list) and raw_data['errors'] else raw_data['errors']
+                code = first.get('code') if isinstance(first, dict) else None
+                msg = first.get('message') if isinstance(first, dict) else str(first)
+                print(f'API错误: {code} {msg}')
+                print(response)
+                return False
+        except Exception:
+            if 'Rate limit exceeded' in response:
+                print('API次数已超限')
+            else:
+                print('获取数据失败')
+            print(response)
+            return False
         if not self.cursor: #第一次
             raw_data = raw_data['data']['search_by_raw_query']['search_timeline']['timeline']['instructions'][-1]['entries']
             if len(raw_data) == 2:

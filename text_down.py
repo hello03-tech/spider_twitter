@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 
 from user_info import User_info
-from url_utils import quote_url
+from url_utils import quote_url, cookie_get, require_cookie_fields
 
 
 
@@ -116,8 +116,8 @@ class text_down():
             'authorization':'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
         }
         self._headers['cookie'] = cookie
-        re_token = 'ct0=(.*?);'
-        self._headers['x-csrf-token'] = re.findall(re_token, cookie)[0]
+        require_cookie_fields(cookie, 'auth_token', 'ct0')
+        self._headers['x-csrf-token'] = cookie_get(cookie, 'ct0')
 
         if not get_other_info(self._user_info, self._headers):
             return False

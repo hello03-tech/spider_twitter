@@ -6,8 +6,11 @@ import bs4
 import re
 
 def get_url_path(url):
-    path = re.findall(r'https?://x\.com(.*?)\?', url)[0]
-    return path
+    # Support both x.com and twitter.com GraphQL endpoints.
+    m = re.search(r'https?://(?:x\.com|twitter\.com)(.*?)\?', url)
+    if not m:
+        raise ValueError(f'无法从URL提取path: {url}')
+    return m.group(1)
 
 def get_transaction_id():
     # https://github.com/iSarabjitDhiman/XClientTransaction
